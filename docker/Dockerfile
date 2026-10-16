@@ -96,8 +96,12 @@ RUN arch="$(uname -m)"; \
 
 # zig-as-llvm: thin cc/c++/ar/... wrappers around zig, keyed off $ZIG_TARGET.
 # The wrappers `exec zig ...`, so zig must be on PATH (below) for linux/bsd builds.
+# Not fatal: only the linux/bsd platforms use it. The bionic image (NDK clang +
+# the llvm-custom release) must not die because a third-party repo moved, so a
+# failed clone just warns.
 RUN if [ ! -f /opt/.no-zig ]; then \
-        git clone --depth 1 "https://github.com/${REPO_OWNER}/zig-as-llvm" /opt/zig-as-llvm; \
+        git clone --depth 1 "https://github.com/${REPO_OWNER}/zig-as-llvm" /opt/zig-as-llvm \
+        || { echo "WARNING: zig-as-llvm clone from ${REPO_OWNER} failed; linux/bsd builds unavailable, bionic unaffected" >&2; rm -rf /opt/zig-as-llvm; }; \
     fi
 
 # zig on PATH so the zig-as-llvm wrappers resolve it. llvm-mingw stays off PATH

@@ -32,10 +32,14 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
+          # REPO_OWNER names the owner that has zig-as-llvm. It lives only in
+          # HomuHomu833, not the fork org, and the Dockerfile clones
+          # github.com/${REPO_OWNER}/zig-as-llvm -- pointing it at the fork org
+          # makes git ask for credentials on a 404 and kills the image build.
           context: ./docker
           push: true
           build-args: |
-            REPO_OWNER=${{ env.OWNER }}
+            REPO_OWNER=HomuHomu833
           tags: ghcr.io/${{ env.OWNER }}/ndk-builder:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
