@@ -16,6 +16,10 @@ on:
         description: "Only these targets (JSON array), default all"
         required: false
         type: string
+      release_suffix:
+        description: "Suffix for the release tag, e.g. a2a2124 (default: short commit sha)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -30,6 +34,9 @@ jobs:
       version: ${{ inputs.version }}
       revision: ${{ inputs.revision }}
       only: ${{ inputs.only }}
+      # Empty => the reusable workflow tags the release with the short commit
+      # sha (r<version>+<sha>), so the fixed build never overwrites the old r30.
+      release_suffix: ${{ inputs.release_suffix }}
       # arm64 only: the device that needs this build is aarch64, and one target
       # keeps the bionic matrix (the long pole) short.
       targets: '["aarch64-linux-android"]'

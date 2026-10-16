@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: ""
+      release_suffix:
+        description: "Suffix appended to the release tag after '+' (default: short commit sha)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -96,12 +101,27 @@ jobs:
           ext="tar.xz"; [ "${{ inputs.platform }}" = windows ] && ext="7z"
           echo "ARTIFACT=android-ndk-r${{ inputs.version }}${{ inputs.revision }}-${{ matrix.target }}.${ext}" >> "$GITHUB_ENV"
 
+      # The release tag must identify the exact build. Historically it was just
+      # `r<version>`, so the pre-splice and post-splice tarballs shared one tag
+      # and were indistinguishable -- a consumer pinning r30 had no way to tell
+      # the broken build from the fixed one. Append a suffix after '+': the
+      # release_suffix input when set, otherwise the short commit sha, so every
+      # commit gets a unique, traceable tag and old tags are never rewritten.
+      - name: Compute release tag
+        run: |
+          suffix='${{ inputs.release_suffix }}'
+          if [ -z "$suffix" ]; then
+            suffix="$(git rev-parse --short=8 HEAD)"
+          fi
+          echo "RELEASE_TAG=r${{ inputs.version }}+${suffix}" >> "$GITHUB_ENV"
+          echo "release tag: r${{ inputs.version }}+${suffix}"
+
       - name: Release
         uses: ncipollo/release-action@v1.21.0
         with:
-          name: "r${{ inputs.version }}"
-          tag: "r${{ inputs.version }}"
+          name: "${{ env.RELEASE_TAG }}"
+          tag: "${{ env.RELEASE_TAG }}"
           artifacts: ${{ github.workspace }}/${{ env.ARTIFACT }}
           allowUpdates: true
           replacesArtifacts: true
-          body: ''
+          body: 'Built from ${{ github.sha }}'
