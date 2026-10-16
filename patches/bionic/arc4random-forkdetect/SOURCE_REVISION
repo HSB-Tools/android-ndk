@@ -1,0 +1,18 @@
+These sources are vendored from AOSP bionic, ref main:
+
+  https://android.googlesource.com/platform/bionic/+/731631f300090436d7f5df80d50b6275c8c60a93
+  (mirror: https://github.com/aosp-mirror/platform_bionic @ 731631f300090436d7f5df80d50b6275c8c60a93, 2025-03-26)
+
+  src/arc4random.c       libc/upstream-openbsd/lib/libc/crypt/arc4random.c
+  src/arc4random.h       libc/upstream-openbsd/android/include/arc4random.h
+  src/chacha_private.h   libc/upstream-openbsd/lib/libc/crypt/chacha_private.h
+
+Verified byte-identical to that revision on 2026-10-16 (diff against a fresh
+fetch), except src/arc4random.h drops three comment-only lines that were
+commented-out _ARC4_LOCK/_ARC4_UNLOCK defines. No code differs.
+
+To re-verify after an upstream change:
+  curl -sfL https://raw.githubusercontent.com/aosp-mirror/platform_bionic/731631f300090436d7f5df80d50b6275c8c60a93/libc/upstream-openbsd/lib/libc/crypt/arc4random.c | diff - src/arc4random.c
+
+If you deliberately move to a newer bionic, update this file's SHA and re-run
+the gates (a -static binary runs direct rc=0; the fork oracle prints DIFF).
