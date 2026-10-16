@@ -1278,6 +1278,63 @@ HOST_ARCH=x86_64' "$NDK/build/tools/ndk_bin_common.sh"
   done
 }
 
+# --- arc4random fork-safety splice ------------------------------------------
+# The official NDK's sysroot arc4random.o gets its fork safety from
+# madvise(MADV_WIPEONFORK), which kernels before 4.14 reject with EINVAL; bionic
+# answers that with __libc_fatal, so every `-static` product dies at startup
+# ("arc4random data MADV_WIPEONFORK failed"). The host-executable wrap above
+# cannot help a user program that never passes -Wl,--wrap. Rebuild that one
+# archive member from bionic main (pid-check forkdetect, no madvise) and splice
+# it into each ABI's libc.a. Kit: patches/bionic/arc4random-forkdetect/.
+splice_arc4random() {
+  [ "$PLATFORM" = bionic ] || return 0
+  local kit="$ROOT/patches/bionic/arc4random-forkdetect"
+  local work="$BUILD/arc4random-splice" libc cc n=0
+  local libs=()
+  [ -d "$kit/src" ] || { echo "splice_arc4random: $kit/src missing" >&2; exit 1; }
+  mkdir -p "$work/inc/async_safe"
+  cp -R "$kit/." "$work/"
+  cat > "$work/inc/async_safe/log.h" <<'EOF'
+#pragma once
+int async_safe_fatal_no_abort(const char* fmt, ...)
+    __attribute__((format(printf, 1, 2)));
+#define async_safe_fatal(...) async_safe_fatal_no_abort(__VA_ARGS__)
+EOF
+  # One wrapper per ABI is enough: a sysroot libc.a is per-ABI, not per-API, so
+  # any API level resolves the same archive -- and --print-file-name does the
+  # armv7a-linux-androideabi -> arm-linux-androideabi mapping for us.
+  for cc in "$NDK_TOOLCHAIN"/bin/aarch64-linux-android*-clang \
+            "$NDK_TOOLCHAIN"/bin/armv7a-linux-androideabi*-clang \
+            "$NDK_TOOLCHAIN"/bin/i686-linux-android*-clang \
+            "$NDK_TOOLCHAIN"/bin/x86_64-linux-android*-clang \
+            "$NDK_TOOLCHAIN"/bin/riscv64-linux-android*-clang; do
+    [ -x "$cc" ] || continue
+    libc="$("$cc" --print-file-name=libc.a 2>/dev/null || true)"
+    [ -f "$libc" ] || continue
+    case " ${libs[*]-} " in *" $libc "*) continue ;; esac
+    libs+=("$libc")
+    log "Splicing arc4random.o into $libc"
+    "$cc" -O2 -fPIC -include "$work/compat.h" -I"$work" -I"$work/src" -I"$work/inc" \
+        -c "$work/src/arc4random.c" -o "$work/arc4random.o"
+    "$cc" -O2 -fPIC -c "$work/arc4_lock.c" -o "$work/arc4_lock.o"
+    "$NDK_TOOLCHAIN/bin/ld.lld" -r -o "$work/arc4random_merged.o" \
+        "$work/arc4random.o" "$work/arc4_lock.o"
+    grep -aq MADV_WIPEONFORK "$work/arc4random_merged.o" \
+      && { echo "splice_arc4random: replacement still carries MADV_WIPEONFORK" >&2; exit 1; }
+    "$NDK_TOOLCHAIN/bin/llvm-nm" --defined-only "$work/arc4random_merged.o" \
+        | grep -q ' T arc4random_mutex_lock' \
+      || { echo "splice_arc4random: replacement lacks arc4random_mutex_lock" >&2; exit 1; }
+    [ -f "$libc.orig-wipeonfork" ] || cp -p "$libc" "$libc.orig-wipeonfork"
+    # llvm-ar matches the member by basename, so the merged object must be named
+    # arc4random.o in the directory the archiver runs from.
+    cp "$work/arc4random_merged.o" "$work/arc4random.o"
+    ( cd "$work" && "$NDK_TOOLCHAIN/bin/llvm-ar" r "$libc" arc4random.o )
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || { echo "splice_arc4random: no libc.a patched" >&2; exit 1; }
+  log "arc4random.o spliced into $n libc.a"
+}
+
 # --- package ----------------------------------------------------------------
 archive() {
   local parent base out
@@ -1307,5 +1364,6 @@ build_python
 strip_deps
 fetch_llvm
 assemble_ndk
+splice_arc4random
 archive
 log "Done -> $NDK"
