@@ -1369,7 +1369,14 @@ build_pydeps
 build_python
 strip_deps
 fetch_llvm
-assemble_ndk
+# Splice BEFORE assemble_ndk: assemble_unix() replaces every ELF in
+# $NDK_TOOLCHAIN/bin with the cross-built Android aarch64 host tools and rewrites
+# the clang wrappers' shebangs to #!/system/bin/sh, so after it the toolchain can
+# no longer execute on the x86_64 runner ("cannot execute: required file not
+# found", rc=127). Before it, $NDK_TOOLCHAIN is the official NDK with a native
+# clang and the real sysroot, and neither assemble_unix() nor rename_host()
+# touches sysroot/, so the patched libc.a carries into the archive.
 splice_arc4random
+assemble_ndk
 archive
 log "Done -> $NDK"
