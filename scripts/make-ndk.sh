@@ -1292,14 +1292,9 @@ splice_arc4random() {
   local work="$BUILD/arc4random-splice" libc cc n=0
   local libs=()
   [ -d "$kit/src" ] || { echo "splice_arc4random: $kit/src missing" >&2; exit 1; }
-  mkdir -p "$work/inc/async_safe"
-  cp -R "$kit/." "$work/"
-  cat > "$work/inc/async_safe/log.h" <<'EOF'
-#pragma once
-int async_safe_fatal_no_abort(const char* fmt, ...)
-    __attribute__((format(printf, 1, 2)));
-#define async_safe_fatal(...) async_safe_fatal_no_abort(__VA_ARGS__)
-EOF
+  # shellcheck source=../patches/bionic/arc4random-forkdetect/splice-core.sh
+  . "$kit/splice-core.sh"
+  arc4_splice_work_init "$work" "$kit"
   # Locate each ABI's libc.a by its sysroot path, not through the driver:
   # `clang --print-file-name=libc.a` printed the bare string "libc.a" for an
   # Android target in CI, so every ABI was skipped and nothing got patched.
@@ -1320,21 +1315,7 @@ EOF
     case " ${libs[*]-} " in *" $libc "*) continue ;; esac
     libs+=("$libc")
     log "Splicing arc4random.o into $libc"
-    "$cc" -O2 -fPIC -include "$work/compat.h" -I"$work" -I"$work/src" -I"$work/inc" \
-        -c "$work/src/arc4random.c" -o "$work/arc4random.o"
-    "$cc" -O2 -fPIC -c "$work/arc4_lock.c" -o "$work/arc4_lock.o"
-    "$NDK_TOOLCHAIN/bin/ld.lld" -r -o "$work/arc4random_merged.o" \
-        "$work/arc4random.o" "$work/arc4_lock.o"
-    grep -aq MADV_WIPEONFORK "$work/arc4random_merged.o" \
-      && { echo "splice_arc4random: replacement still carries MADV_WIPEONFORK" >&2; exit 1; }
-    "$NDK_TOOLCHAIN/bin/llvm-nm" --defined-only "$work/arc4random_merged.o" \
-        | grep -q ' T arc4random_mutex_lock' \
-      || { echo "splice_arc4random: replacement lacks arc4random_mutex_lock" >&2; exit 1; }
-    [ -f "$libc.orig-wipeonfork" ] || cp -p "$libc" "$libc.orig-wipeonfork"
-    # llvm-ar matches the member by basename, so the merged object must be named
-    # arc4random.o in the directory the archiver runs from.
-    cp "$work/arc4random_merged.o" "$work/arc4random.o"
-    ( cd "$work" && "$NDK_TOOLCHAIN/bin/llvm-ar" r "$libc" arc4random.o )
+    arc4_splice_abi "$cc" "$libc" "$work" || exit 1
     n=$((n + 1))
   done
   [ "$n" -gt 0 ] || { echo "splice_arc4random: no libc.a patched" >&2; exit 1; }

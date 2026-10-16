@@ -128,13 +128,9 @@ fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/arc4random-splice.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/inc/async_safe"
-cat > "$WORK/inc/async_safe/log.h" <<'EOF'
-#pragma once
-int async_safe_fatal_no_abort(const char* fmt, ...)
-    __attribute__((format(printf, 1, 2)));
-#define async_safe_fatal(...) async_safe_fatal_no_abort(__VA_ARGS__)
-EOF
+# shellcheck source=splice-core.sh
+. "$HERE/splice-core.sh"
+arc4_splice_work_init "$WORK" "$HERE"
 
 for CC in "${CCS[@]}"; do
   # Derive the per-ABI lib dir from the wrapper's own name (strip -clang, then
@@ -153,21 +149,7 @@ for CC in "${CCS[@]}"; do
   [ -f "$LIBC" ] || { echo "$CC: no libc.a at $LIBC" >&2; exit 1; }
   echo "==> $CC -> $LIBC"
 
-  "$CC" -O2 -fPIC -include "$HERE/compat.h" -I"$HERE" -I"$HERE/src" -I"$WORK/inc" \
-      -c "$HERE/src/arc4random.c" -o "$WORK/arc4random.o"
-  "$CC" -O2 -fPIC -c "$HERE/arc4_lock.c" -o "$WORK/arc4_lock.o"
-  "$BIN/ld.lld" -r -o "$WORK/arc4random_merged.o" "$WORK/arc4random.o" "$WORK/arc4_lock.o"
-
-  grep -aq MADV_WIPEONFORK "$WORK/arc4random_merged.o" \
-    && { echo "refusing: replacement still carries MADV_WIPEONFORK" >&2; exit 1; }
-  "$BIN/llvm-nm" --defined-only "$WORK/arc4random_merged.o" | grep -q ' T arc4random_mutex_lock' \
-    || { echo "refusing: replacement lacks arc4random_mutex_lock" >&2; exit 1; }
-
-  [ -f "$LIBC.orig-wipeonfork" ] || cp -p "$LIBC" "$LIBC.orig-wipeonfork"
-  # Member replacement: llvm-ar matches the member by the basename it is given,
-  # so stage the merged object under the name `arc4random.o` and archive from
-  # the scratch dir (the kit tree itself stays clean).
-  cp "$WORK/arc4random_merged.o" "$WORK/arc4random.o"
-  ( cd "$WORK" && "$BIN/llvm-ar" r "$LIBC" arc4random.o )
+  arc4_splice_abi "$CC" "$LIBC" "$WORK" \
+    || { echo "$CC: splice failed" >&2; exit 1; }
   echo "    spliced arc4random.o into $LIBC"
 done
