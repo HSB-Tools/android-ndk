@@ -1300,17 +1300,23 @@ int async_safe_fatal_no_abort(const char* fmt, ...)
     __attribute__((format(printf, 1, 2)));
 #define async_safe_fatal(...) async_safe_fatal_no_abort(__VA_ARGS__)
 EOF
-  # One wrapper per ABI is enough: a sysroot libc.a is per-ABI, not per-API, so
-  # any API level resolves the same archive -- and --print-file-name does the
-  # armv7a-linux-androideabi -> arm-linux-androideabi mapping for us.
-  for cc in "$NDK_TOOLCHAIN"/bin/aarch64-linux-android*-clang \
-            "$NDK_TOOLCHAIN"/bin/armv7a-linux-androideabi*-clang \
-            "$NDK_TOOLCHAIN"/bin/i686-linux-android*-clang \
-            "$NDK_TOOLCHAIN"/bin/x86_64-linux-android*-clang \
-            "$NDK_TOOLCHAIN"/bin/riscv64-linux-android*-clang; do
-    [ -x "$cc" ] || continue
-    libc="$("$cc" --print-file-name=libc.a 2>/dev/null || true)"
-    [ -f "$libc" ] || continue
+  # Locate each ABI's libc.a by its sysroot path, not through the driver:
+  # `clang --print-file-name=libc.a` printed the bare string "libc.a" for an
+  # Android target in CI, so every ABI was skipped and nothing got patched.
+  # The archive is per-ABI (not per-API), and its path is fixed by the NDK
+  # layout -- $NDK_TOOLCHAIN/sysroot/usr/lib/<libdir>/libc.a. The wrapper name
+  # carries the ABI (aarch64-linux-android, armv7a-linux-androideabi, ...); the
+  # arm one is the only whose lib dir name differs from its triple.
+  for abi in aarch64-linux-android armv7a-linux-androideabi i686-linux-android \
+             x86_64-linux-android riscv64-linux-android; do
+    case "$abi" in
+      armv7a-linux-androideabi) libdir=arm-linux-androideabi ;;
+      *)                        libdir="$abi" ;;
+    esac
+    cc="$(ls "$NDK_TOOLCHAIN/bin/$abi"*-clang 2>/dev/null | head -n1)"
+    [ -n "$cc" ] && [ -x "$cc" ] || continue
+    libc="$NDK_TOOLCHAIN/sysroot/usr/lib/$libdir/libc.a"
+    [ -f "$libc" ] || { echo "splice_arc4random: no $libc" >&2; continue; }
     case " ${libs[*]-} " in *" $libc "*) continue ;; esac
     libs+=("$libc")
     log "Splicing arc4random.o into $libc"

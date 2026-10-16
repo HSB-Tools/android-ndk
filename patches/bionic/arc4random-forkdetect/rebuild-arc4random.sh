@@ -137,10 +137,20 @@ int async_safe_fatal_no_abort(const char* fmt, ...)
 EOF
 
 for CC in "${CCS[@]}"; do
-  # clang resolves the per-ABI lib dir itself (armv7a-linux-androideabi ->
-  # arm-linux-androideabi), so ask it rather than reimplementing the mapping.
-  LIBC="$("$CC" --print-file-name=libc.a)"
-  [ -f "$LIBC" ] || { echo "$CC: no libc.a via --print-file-name ($LIBC)" >&2; exit 1; }
+  # Derive the per-ABI lib dir from the wrapper's own name (strip -clang, then
+  # the API digits): aarch64-linux-android24-clang -> aarch64-linux-android,
+  # armv7a-linux-androideabi24-clang -> arm-linux-androideabi. Asking clang
+  # with --print-file-name=libc.a is not reliable -- it prints the bare string
+  # "libc.a" for an Android target -- so build the sysroot path directly.
+  ABI="$(basename "$CC")"; ABI="${ABI%-clang}"
+  # strip the API level, which can be one digit or two (android21 ... android37)
+  while case "$ABI" in *[0-9]) true ;; *) false ;; esac; do ABI="${ABI%?}"; done
+  case "$ABI" in
+    armv7a-linux-androideabi) LIBDIR=arm-linux-androideabi ;;
+    *)                        LIBDIR="$ABI" ;;
+  esac
+  LIBC="$BIN/../sysroot/usr/lib/$LIBDIR/libc.a"
+  [ -f "$LIBC" ] || { echo "$CC: no libc.a at $LIBC" >&2; exit 1; }
   echo "==> $CC -> $LIBC"
 
   "$CC" -O2 -fPIC -include "$HERE/compat.h" -I"$HERE" -I"$HERE/src" -I"$WORK/inc" \
